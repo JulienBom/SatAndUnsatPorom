@@ -1,0 +1,28 @@
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, 
+                 TestFunction, TrialFunction, Coefficient, 
+                 dx, ds)
+
+# Mesh
+cell = triangle
+n = 2
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+
+vTest = TestFunction(elemF)
+vTrial = TrialFunction(elemF)
+
+# Coefficients
+N = Coefficient(elemCte)  
+
+a = vTest*vTrial*dx
+
+L = vTest*ds(N) 
+L4 = vTest*ds(4) 
+L5 = vTest*ds(5) 
+L6 = vTest*ds(6) 
+L7 = vTest*ds(7) 
+
+forms=[a, L, L4, L5, L6, L7]

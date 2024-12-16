@@ -1,0 +1,62 @@
+"""
+Compute Stress and fluid filtration vectors
+Geometry is 3D with plane strain hypothesis
+"""
+
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 tr, sym, transpose, Identity, cofac,
+                 nabla_grad, inner,FacetNormal,
+                 sqrt, dx, ds)
+
+# Mesh
+cell = triangle
+normale = FacetNormal(cell) 
+n = 2
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+I = Identity(cell.geometric_dimension()) 
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+
+vTest = TestFunction(elemF)
+vTrial = TrialFunction(elemF)
+
+Win = MixedElement(elemV,elemF,elemF)
+w = Coefficient(Win)
+(_,pl,pg) = split(w)
+pc = pg-pl
+
+# Coefficients
+Kil = Coefficient(elemCte)   # Perméabilité intrinsèque
+Etal = Coefficient(elemCte)  # Viscosité
+rhoL = Coefficient(elemCte)  # Masse volumique du fluide
+g = Coefficient(elemV)       # gravité (vectoriel)
+T = Coefficient(elemV)       # Terme de force VN (vectoriel)
+pe = Coefficient(elemF)
+M = Coefficient(elemCte)
+m = Coefficient(elemCte)
+
+
+# Miscellaneous
+pos = lambda var : (var + abs(var))/2
+#  intégrale approximée par 1 trapèze de a à b de Sr par rapport à pc
+trapS = lambda pCa, pCb : (1/2)*(Sl(pCa) + Sl(pCb))*(pCb-pCa) 
+#  intégrale approximée par 10 trapèzes de a à b de Sr par rapport à pc
+intS = lambda pCa, pCb : (trapS(pCa,0.1*(pCb-pCa)+pCa) + trapS(0.1*(pCb-pCa)+pCa,0.2*(pCb-pCa)+pCa) +trapS(0.2*(pCb-pCa)+pCa,0.3*(pCb-pCa)+pCa) +trapS(0.3*(pCb-pCa)+pCa,0.4*(pCb-pCa)+pCa) +trapS(0.4*(pCb-pCa)+pCa,0.5*(pCb-pCa)+pCa)
+                        + trapS(0.5*(pCb-pCa)+pCa,0.6*(pCb-pCa)+pCa) + trapS(0.6*(pCb-pCa)+pCa,0.7*(pCb-pCa)+pCa) +trapS(0.7*(pCb-pCa)+pCa,0.8*(pCb-pCa)+pCa) +trapS(0.8*(pCb-pCa)+pCa,0.9*(pCb-pCa)+pCa) +trapS(0.9*(pCb-pCa)+pCa,pCb))
+
+# Saturation degree
+Sl = lambda pCvar : ( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m) 
+
+# Relative permeability
+kl =  lambda pCvar : Sl(pCvar)**3
+dkl = lambda pCvar : 3*Sl(pCvar)**2
+
+
+a = vTest*vTrial*dx
+
+L = kl(pc)/Etal*inner(Kil*(-nabla_grad(pl)+(rhoL*g)),normale)*vTest*ds(7) 

@@ -1,0 +1,41 @@
+"""
+Compute needed correction for fluid pressures to impose them as the atmospheric pressure 
+Geometry is 2D
+"""
+
+from ufl_legacy import (triangle, tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 tr, sym, transpose, Identity, cofac,
+                 nabla_grad, inner,
+                 sqrt, dx)
+
+# Mesh
+cell = triangle
+n = 2
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+
+W = MixedElement(elemV,elemF,elemF)
+P = MixedElement(elemF,elemF)
+wt = Coefficient(W)
+(_,plt,pgt) = split(wt)
+h = Coefficient(elemCte)
+
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+
+
+pTest = TestFunction(P)
+pTrial = TrialFunction(P)
+p_atm = Coefficient(elemF)
+
+epsilon_l = Coefficient(elemCte) # Small epsilon for gaz definition in the saturated domain
+
+
+
+a = inner(pTrial,pTest)*dx
+L = (p_atm*(1-epsilon_l) -plt)*pTest[0]*dx + (p_atm-pgt)*pTest[1]*dx

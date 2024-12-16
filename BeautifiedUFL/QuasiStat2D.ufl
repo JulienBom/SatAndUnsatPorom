@@ -1,0 +1,69 @@
+"""
+Measure surfaces of s(1) and s(2)
+Geometry is 2D, surfaces are then 1D
+"""
+
+from ufl_legacy import (triangle, Coefficient, split, dx,inner, TensorElement,VectorElement,FiniteElement,MixedElement,sym, nabla_grad,tr)
+
+# Mesh
+cell = triangle
+n = 2
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+elemT = TensorElement("Lagrange", cell, n-1)
+elemV = VectorElement("Lagrange", cell, n, dim=2)
+elemF = FiniteElement("Lagrange", cell, n-1)
+W = MixedElement(elemV, elemF,elemF)
+WDual = MixedElement(elemT,elemV,elemV,elemF)
+elemCte = FiniteElement("Real", cell, 0)
+
+
+
+K = Coefficient(elemCte)
+Mu = Coefficient(elemCte)
+
+wt = Coefficient(W)
+(ut,plt,pgt) = split(wt)
+
+wk = Coefficient(W)
+(uk,plk,pgk) = split(wk)
+
+wDual = Coefficient(WDual)
+(_,vlk,vgk,_) = split(wDual)
+
+wDualt = Coefficient(WDual)
+(_,vlt,vgt,_) = split(wDualt)
+
+f1 = ((plt-plk)**2)*dx
+
+f2 = ((pgt-pgk)**2)*dx 
+
+f3 = (plt**2)*dx
+
+f4 = (pgt**2)*dx 
+
+f5 = (plk**2)*dx
+
+f6 = (pgk**2)*dx 
+
+f7 = (inner(vlk-vlt,vlk-vlt))*dx
+
+f8 = (inner(vgk-vgt,vgk-vgt))*dx 
+
+f9 = (inner(vlk,vlk))*dx
+
+f10 = (inner(vgk,vgk))*dx 
+
+f11 = (inner(vlt,vlt))*dx
+
+f12 = (inner(vgt,vgt))*dx 
+
+h1srel = f1+f7
+h1lrel = f1+f7
+h1grel = f2+f8
+
+h1st = f3 + f11
+h1lt = f3 + f11
+h1gt = f4 + f12
+
+forms = [f1, f2, f3, f4, f5, f6, f7, f8, h1srel, h1lrel, h1grel, h1st, h1lt, h1gt, f9, f10 ,f11,f12]

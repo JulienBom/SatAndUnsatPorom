@@ -1,0 +1,47 @@
+"""
+Compute needed correction for fluid pressures to impose them as the atmospheric pressure 
+Geometry is 2D
+"""
+
+from ufl_legacy import (triangle, tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 tr, sym, transpose, Identity, cofac,
+                 nabla_grad, inner, SpatialCoordinate,
+                 sqrt, dx)
+
+# Mesh
+cell = triangle
+x = SpatialCoordinate(cell) # 0 is abscissae 1 is ordinate
+n = 2
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+
+W = MixedElement(elemV,elemF,elemF)
+P = MixedElement(elemF,elemF)
+wt = Coefficient(W)
+(_,plt,pgt) = split(wt)
+
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+
+pos = lambda x : (abs(x) + x)/2
+
+pTest = TestFunction(P)
+pTrial = TrialFunction(P)
+p_atm = Coefficient(elemF)
+rhoL = Coefficient(elemCte)
+g = Coefficient(elemV)
+sea_level = Coefficient(elemCte)
+epsilon_g = Coefficient(elemCte)
+
+
+head = p_atm+rhoL*sqrt(inner(g,g))*(sea_level-x[1])
+
+
+a = inner(pTrial,pTest)*dx
+L = ((head -plt)*pTest[0]*dx
+     + (head - epsilon_g*abs(head) -pgt)*pTest[1]*dx)

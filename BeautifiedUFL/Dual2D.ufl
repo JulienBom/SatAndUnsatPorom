@@ -1,0 +1,113 @@
+"""
+Compute Stress and fluid filtration vectors
+Geometry is 3D with plane strain hypothesis
+"""
+
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 tr, sym, transpose, Identity, cofac,
+                 nabla_grad, inner,
+                 sqrt, dx)
+
+# Mesh
+cell = triangle
+n = 2
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+I = Identity(cell.geometric_dimension()) 
+elemT = TensorElement("Lagrange", cell, n-1)
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+
+Wout = MixedElement(elemT,elemV,elemV,elemF)
+
+wTest = TestFunction(Wout)
+(eps,vl,vg,eps_zz) = split(wTest)
+wTrial = TrialFunction(Wout)
+
+
+Win = MixedElement(elemV,elemF,elemF)
+w = Coefficient(Win)
+(u,pl,pg) = split(w)
+pc = pg-pl
+
+
+w0 = Coefficient(Win)
+(_,pl0,pg0) = split(w0)
+pc0 = pg0-pl0
+
+# Coefficients
+K = Coefficient(elemCte)     # Bulk Modulus
+Mu = Coefficient(elemCte)    # Coefficient de cisaillement
+# b = Coefficient(elemCte)     # trace du tenseur de Biot supposé constant
+# N = Coefficient(elemCte)     # Module de Biot
+Kil = Coefficient(elemCte)   # Perméabilité intrinsèque
+Etal = Coefficient(elemCte)  # Viscosité
+Kig = Coefficient(elemCte)   # Perméabilité intrinsèque
+Etag = Coefficient(elemCte)  # Viscosité
+phi0 = Coefficient(elemF)    # porosité initiale
+rhoS = Coefficient(elemCte)  # Masse volumique du solide
+rhoL = Coefficient(elemCte)  # Masse volumique du fluide
+g = Coefficient(elemV)       # gravité (vectoriel)
+T = Coefficient(elemV)       # Terme de force VN (vectoriel)
+pe = Coefficient(elemF)
+M = Coefficient(elemCte)
+m = Coefficient(elemCte)
+
+
+# sigma0 = Coefficient(elemT) 
+
+Csteg = Coefficient(elemCte) # Constante gaz parfait : Masse molaire/ R * Température
+
+# Miscellaneous
+pos = lambda var : (var + abs(var))/2
+#  intégrale approximée par 1 trapèze de a à b de Sr par rapport à pc
+trapS = lambda pCa, pCb : (1/2)*(Sl(pCa) + Sl(pCb))*(pCb-pCa) 
+#  intégrale approximée par 10 trapèzes de a à b de Sr par rapport à pc
+intS = lambda pCa, pCb : (trapS(pCa,0.1*(pCb-pCa)+pCa) + trapS(0.1*(pCb-pCa)+pCa,0.2*(pCb-pCa)+pCa) +trapS(0.2*(pCb-pCa)+pCa,0.3*(pCb-pCa)+pCa) +trapS(0.3*(pCb-pCa)+pCa,0.4*(pCb-pCa)+pCa) +trapS(0.4*(pCb-pCa)+pCa,0.5*(pCb-pCa)+pCa)
+                        + trapS(0.5*(pCb-pCa)+pCa,0.6*(pCb-pCa)+pCa) + trapS(0.6*(pCb-pCa)+pCa,0.7*(pCb-pCa)+pCa) +trapS(0.7*(pCb-pCa)+pCa,0.8*(pCb-pCa)+pCa) +trapS(0.8*(pCb-pCa)+pCa,0.9*(pCb-pCa)+pCa) +trapS(0.9*(pCb-pCa)+pCa,pCb))
+
+# Small Strain tensor
+strain = lambda var : sym(nabla_grad(var))
+
+# Saturation degree
+Sl = lambda pCvar : ( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m) # inverse of the saturation degree 
+dSl = lambda pCvar :  (-m/(M*(1-m))) *( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m-1) *((pos(pCvar-pe)/M)**(m/(1-m)))#   
+
+
+# Relative permeability
+kl =  lambda pCvar : Sl(pCvar)**3
+kg =  lambda pCvar : (1-Sl(pCvar))**3
+dkl = lambda pCvar : 3*Sl(pCvar)**2
+
+# Equivalent pore pressure
+pore_pressure = lambda plvar, pgvar :  pgvar - intS(1,pgvar-plvar) 
+
+# Stress - 3D w/ plane strain 
+sigma = lambda uvar, plvar, pgvar : (K-2*Mu/3)*tr(strain(uvar))*I + 2*Mu*strain(uvar) - ( pore_pressure(plvar,pgvar) - pore_pressure(pl0,pg0))*I# + sigma0 
+sigma_zz = lambda uvar, plvar, pgvar : (K-2*Mu/3)*tr(strain(uvar)) - (pore_pressure(plvar,pgvar) - pore_pressure(pl0,pg0))# + sigma0_zz 
+
+phi = lambda uvar : phi0 + tr(strain(uvar))
+rho = lambda plvar, pgvar, uvar : rhoS + phi(uvar)*(- rhoS + Sl(pgvar-plvar)*rhoL)
+
+
+a = inner(wTrial,wTest)*dx
+L = (inner(sigma(u,pl,pg),eps) # Ne comprends pas la contrainte initiale Sigma0
+    + kl(pc)/Etal*inner(Kil*(-nabla_grad(pl)),vl)
+    + kl(pc)/Etal*inner(Kil*(rhoL*g),vl)
+    + kg(pc)/Etag*inner(Kig*(-nabla_grad(pg)),vg)
+    # + (pck-pc0)*dkg(pc0)*dSl(pc0)/Etal*inner(Kil*(-nabla_grad(pl0)),vl)
+    # + kg(pg-pl)/Etag*inner(Kig*((pg*Csteg*(I + 0*nabla_grad(u)).T)*g),vg)
+    #+ 0*kg(pg-pl)/Etag*inner(Kig*(-nabla_grad(pg)),vg)
+    + sigma_zz(u,pl,pg)*eps_zz 
+    )*dx 
+
+# L = ( inner(sigma(pl,pg,u),eps)
+#     + kl(pg-pl)/Etal*inner(cofac(I + nabla_grad(u))*Kil*(I - nabla_grad(u).T)*(-nabla_grad(pl)),vl)
+#     + kl(pg-pl)/Etal*inner(Kil*rhoL*g,vl)
+#     + kg(pg-pl)/Etag*inner(cofac(I + nabla_grad(u))*Kig*(I - nabla_grad(u).T)*(-nabla_grad(pg)),vg) 
+#     + kg(pg-pl)/Etag*inner(Kig*pg*Csteg*g,vg) )*dx

@@ -1,0 +1,34 @@
+"""
+UFl to sum Newton-Rapshon increments.
+"""
+from ufl_legacy import (tetrahedron, triangle,
+                 VectorElement, FiniteElement, MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient,
+                 conditional,lt,
+                 inner, dx)
+
+# Mesh
+cell = triangle
+n = 2
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+
+W = MixedElement(elemV,elemF,elemF)
+
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+
+wTest = TestFunction(W)
+wTrial = TrialFunction(W)
+wk = Coefficient(W)
+delta_w = Coefficient(W)
+
+(uk,plk,pgk) = split(wk)
+(delta_u,delta_pl,delta_pg) = split(delta_w)
+(v,ql,qg) = split(wTest)
+
+
+a = inner(wTrial,wTest)*dx
+L = (inner(uk+delta_u,v) + (plk+delta_pl)*ql + (pgk+delta_pg)*qg)*dx 

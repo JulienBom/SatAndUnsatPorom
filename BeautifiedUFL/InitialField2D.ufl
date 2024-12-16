@@ -1,0 +1,80 @@
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 FacetNormal, ds, 
+                 tr, sym, transpose, Identity,
+                 nabla_grad, inner,
+                 sqrt, tanh,
+                 conditional,lt,
+                 dx)
+
+
+# Mesh
+cell = triangle
+n = 2
+I = Identity(cell.geometric_dimension()) 
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemF2 = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+
+W = MixedElement(elemV,elemF,elemF)
+
+wTest = TestFunction(W)
+(v,ql,qg) = split(wTest)
+
+wTrial = TrialFunction(W)
+(u,pl,pg) = split(wTrial)
+
+pl0 = Coefficient(elemF)
+pg0 = Coefficient(elemF)
+
+
+# Solid coefficients
+rhoS = Coefficient(elemCte)
+K = Coefficient(elemCte)
+Mu = Coefficient(elemCte)
+phi0= Coefficient(elemCte)
+
+# Liquid Coefficients
+rhoL = Coefficient(elemCte)  # Liquid density
+
+# Gaz coefficients
+Csteg = Coefficient(elemCte) # Custom Gas Constant
+
+# van Genuchten's model
+pe = Coefficient(elemF)      # Entry pressure
+M = Coefficient(elemCte)     # Capillary Modulus (van Genuchten's model)
+m = Coefficient(elemCte)     # - (van Genuchten's model)
+
+# Others
+g = Coefficient(elemV)       # Gravitational acceleration vector 
+
+# Miscellaneous
+pos = lambda var : (var + abs(var))/2
+
+#  intégrale approximée par 1 trapèze de a à b de Sr par rapport à pc
+trapS = lambda pCa, pCb : (1/2)*(Sl(pCa) + Sl(pCb))*(pCb-pCa) 
+#  intégrale approximée par 10 trapèzes de a à b de Sr par rapport à pc
+intS = lambda pCa, pCb : (trapS(pCa,0.1*(pCb-pCa)+pCa) + trapS(0.1*(pCb-pCa)+pCa,0.2*(pCb-pCa)+pCa) +trapS(0.2*(pCb-pCa)+pCa,0.3*(pCb-pCa)+pCa) +trapS(0.3*(pCb-pCa)+pCa,0.4*(pCb-pCa)+pCa) +trapS(0.4*(pCb-pCa)+pCa,0.5*(pCb-pCa)+pCa)
+                        + trapS(0.5*(pCb-pCa)+pCa,0.6*(pCb-pCa)+pCa) + trapS(0.6*(pCb-pCa)+pCa,0.7*(pCb-pCa)+pCa) +trapS(0.7*(pCb-pCa)+pCa,0.8*(pCb-pCa)+pCa) +trapS(0.8*(pCb-pCa)+pCa,0.9*(pCb-pCa)+pCa) +trapS(0.9*(pCb-pCa)+pCa,pCb))
+
+# Small Strain tensor
+strain = lambda var : sym(nabla_grad(var))
+
+# Saturation degree
+Sl = lambda pCvar : ( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m) # inverse of the saturation degree 
+dSl = lambda pCvar :  (-m/(M*(1-m))) *( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m-1) *((pos(pCvar-pe)/M)**(m/(1-m)))#   
+
+# Equivalent pore pressure
+pore_pressure = lambda plvar, pgvar : pgvar - intS(0,pgvar-plvar) 
+delta_pore_pressure = lambda d_plvar, d_pgvar, plvar, pgvar : d_pgvar - Sl(pgvar-plvar)*(d_plvar-d_pgvar)
+
+sigma = lambda plvar, pgvar : -( pore_pressure(plvar,pgvar))*I# + sigma0 
+rho = lambda plvar, pgvar : rhoS + phi0*(- rhoS + Sl(pgvar-plvar)*rhoL)
+delta_sigma = lambda d_uvar : (K-2*Mu/3)*tr(strain(d_uvar))*I + 2*Mu*strain(d_uvar)
+
+a = inner(delta_sigma(u),nabla_grad(v))*dx + pl*ql*dx+pg*qg*dx
+L = (rho(pl0,pg0)*inner(g,v)*dx- inner(sigma(pl0,pg0),nabla_grad(v))*dx) + pl0*ql*dx + pg0*qg*dx

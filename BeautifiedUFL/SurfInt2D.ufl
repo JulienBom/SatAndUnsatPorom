@@ -1,0 +1,14 @@
+"""
+Measure surfaces of s(1) and s(2)
+Geometry is 2D, surfaces are then 1D
+"""
+
+from ufl_legacy import (triangle, ds, FacetNormal,inner)
+
+# Mesh
+cell = triangle
+
+normale = FacetNormal(cell) #0
+f1 = inner(normale,normale)*ds(1)
+f2 = inner(normale,normale)*ds(2)
+forms = [f1,f2]

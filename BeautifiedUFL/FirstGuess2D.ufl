@@ -1,0 +1,35 @@
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, inner,
+                 dx)
+
+
+# Mesh
+cell = triangle
+n = 2
+elemV = VectorElement("Lagrange", cell, n)
+elemF = FiniteElement("Lagrange", cell, n-1)
+
+W = MixedElement(elemV,elemF,elemF)
+
+wTest = TestFunction(W)
+(v,ql,qg) = split(wTest)
+
+wk = TrialFunction(W)
+(uk,plk,pgk) = split(wk)
+
+
+pl0 = Coefficient(elemF)      
+pg0 = Coefficient(elemF)      
+
+aS = inner(uk,v)*dx
+aL = plk*ql*dx
+aG = pgk*qg*dx
+
+
+LL = pl0*ql*dx
+LG = pg0*qg*dx
+
+a = aS + aL + aG
+L = LL + LG

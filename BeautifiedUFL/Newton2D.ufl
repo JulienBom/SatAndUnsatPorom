@@ -1,0 +1,182 @@
+"""
+UFl for Newton-Rapshon increments.
+Geometry is 2D, with plane strain description.
+File is organized following:
+        - Imported functions
+        - Elements definitions
+        - Test and Trial Functions
+        - Coefficient definition
+        - Lambda functions to transcribe terms definition
+        - Solid Momentum Balance
+        - Liquid Mass balance
+        - Gaz Mass balance
+        - Interfacial term defined on Sat./Part.Sat. interface
+        - a and L definition 
+"""
+
+# Imported functions
+from ufl_legacy import (triangle,tetrahedron,
+                 FiniteElement, VectorElement, TensorElement, 
+                 MixedElement, split,
+                 TestFunction, TrialFunction, Coefficient, 
+                 FacetNormal, ds, det,
+                 tr, sym, transpose, Identity,
+                 nabla_grad, inner, div,
+                 sqrt, tanh,
+                 conditional,lt,
+                 dx)
+
+# Elements definitions
+cell = triangle
+n = 2
+q_degree = (5*n+3)
+dx = dx(metadata={'quadrature_degree': q_degree})
+I = Identity(cell.geometric_dimension()) 
+normale = FacetNormal(cell) # 1 : satEdge, 2 : top
+
+elemV = VectorElement("Lagrange", cell, n, dim=2)#cell.geometric_dimension())
+elemF = FiniteElement("Lagrange", cell, n-1)
+elemF2 = FiniteElement("Lagrange", cell, n-1)
+elemCte = FiniteElement("Real", cell, 0)
+elemDG = FiniteElement("DG", cell, n-1)
+elemT = TensorElement("Lagrange", cell, n)
+
+# Test and Trial Functions
+W = MixedElement(elemV,elemF,elemF)
+
+wTest = TestFunction(W)
+(v,ql,qg) = split(wTest)
+
+wTrial = TrialFunction(W)
+(delta_u,delta_pl,delta_pg) = split(wTrial)
+
+# Coefficient definitions
+# initial profile
+w0 = Coefficient(W)
+(_,pl0,pg0) = split(w0)
+phi0 = Coefficient(elemF)    # initial porosity
+
+
+# solution at time t
+wt = Coefficient(W)
+(ut,plt,pgt) = split(wt)
+
+# Newton-Raphson solution at previous iteration 
+wk = Coefficient(W)
+(uk,plk,pgk) = split(wk)
+
+# Coefficients
+# Solid coefficients
+K = Coefficient(elemCte)     # Solid Bulk Modulus
+Mu = Coefficient(elemCte)    # Solide Shear Modulus
+rhoS = Coefficient(elemCte)  # Solid density
+T = Coefficient(elemV)       # A Force vector
+sigma0 = Coefficient(elemT)
+
+# Liquid Coefficients
+Kil = Coefficient(elemCte)   # Liquid intrinsic permeability
+Etal = Coefficient(elemCte)  # Liquid Viscosity
+rhoL = Coefficient(elemCte)  # Liquid density
+Vl = Coefficient(elemV)      # A Liquid Filtration vector
+
+# Gaz coefficients
+Kig = Coefficient(elemCte)   # Gaz intrinsic permeability
+Etag = Coefficient(elemCte)  # Gaz Viscosity
+Vg = Coefficient(elemV)      # A Gaz Filtration vector
+Csteg = Coefficient(elemCte) # Custom Gas Constant
+
+# van Genuchten's model
+pe = Coefficient(elemF)      # Entry pressure
+M = Coefficient(elemCte)     # Capillary Modulus (van Genuchten's model)
+m = Coefficient(elemCte)     # - (van Genuchten's model)
+
+# Others
+g = Coefficient(elemV)       # Gravitational acceleration vector 
+h = Coefficient(elemCte)     # Time step
+p_sat = Coefficient(elemCte) # Small epsilon for gaz definition in the saturated domain
+p_width = Coefficient(elemCte)      
+omega = Coefficient(elemCte)   
+# Functions
+
+# Miscellaneous
+pos = lambda var : (var + abs(var))/2
+H = lambda var : (1+tanh(var))/2 # Heaviside, if 0 lower than x then 1 else 0 
+dH = lambda var : (1-tanh(var)**2)/2 # Heaviside, if 0 lower than x then 1 else 0 
+sgn = lambda var : 2*H(var) - 1
+                                              
+#  intégrale approximée par 1 trapèze de a à b de Sr par rapport à pc
+trapS = lambda pCa, pCb : (1/2)*(Sl(pCa) + Sl(pCb))*(pCb-pCa) 
+#  intégrale approximée par 10 trapèzes de a à b de Sr par rapport à pc
+intS = lambda pCa, pCb : (trapS(pCa,0.1*(pCb-pCa)+pCa) + trapS(0.1*(pCb-pCa)+pCa,0.2*(pCb-pCa)+pCa) +trapS(0.2*(pCb-pCa)+pCa,0.3*(pCb-pCa)+pCa) +trapS(0.3*(pCb-pCa)+pCa,0.4*(pCb-pCa)+pCa) +trapS(0.4*(pCb-pCa)+pCa,0.5*(pCb-pCa)+pCa)
+                        + trapS(0.5*(pCb-pCa)+pCa,0.6*(pCb-pCa)+pCa) + trapS(0.6*(pCb-pCa)+pCa,0.7*(pCb-pCa)+pCa) +trapS(0.7*(pCb-pCa)+pCa,0.8*(pCb-pCa)+pCa) +trapS(0.8*(pCb-pCa)+pCa,0.9*(pCb-pCa)+pCa) +trapS(0.9*(pCb-pCa)+pCa,pCb))
+
+# Small Strain tensor
+strain = lambda var : sym(nabla_grad(var))
+
+# Saturation q_degree
+Sl = lambda pCvar : ( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m) 
+dSl = lambda pCvar :  (-m/(M*(1-m))) *( (pos(pCvar-pe)/M)**(1/(1-m)) + 1 )**(-m-1) *((pos(pCvar-pe)/M)**(m/(1-m)))#   
+
+# Relative permeability
+kl =  lambda pCvar : Sl(pCvar)**3
+dkl =  lambda pCvar : 3*Sl(pCvar)**2
+
+kg =  lambda pCvar : (1-Sl(pCvar))**3
+dkg =  lambda pCvar : -3*(1-Sl(pCvar))**2
+
+# Equivalent pore pressure
+pore_pressure = lambda plvar, pgvar : pgvar - intS(0,pgvar-plvar) 
+delta_pore_pressure = lambda d_plvar, d_pgvar, plvar, pgvar : d_pgvar - Sl(pgvar-plvar)*(d_plvar-d_pgvar)
+
+# Stress - 3D w/ plane strain 
+sigma = lambda  uvar, plvar, pgvar: (K-2*Mu/3)*tr(strain(uvar))*I + 2*Mu*strain(uvar) - ( pore_pressure(plvar,pgvar) - pore_pressure(pl0,pg0))*I
+delta_sigma = lambda d_uvar, d_plvar, d_pgvar, plvar, pgvar : (K-2*Mu/3)*tr(strain(d_uvar))*I + 2*Mu*strain(d_uvar) - (delta_pore_pressure(d_plvar, d_pgvar, plvar, pgvar))*I
+
+sigma_zz = lambda plvar, pgvar : (K-2*Mu/3)*tr(strain(uvar)) - (pore_pressure(plvar,pgvar) - pore_pressure(pl0,pg0))# + sigma0_zz 
+delta_sigma_zz = lambda d_uvar, d_plvar, d_pgvar, plvar, pgvar : (K-2*Mu/3)*tr(strain(d_uvar)) - (delta_pore_pressure(d_plvar, d_pgvar, plvar, pgvar))
+
+# Density
+rho = lambda uvar, plvar, pgvar : rhoS + phi0*(- rhoS + Sl(pgvar-plvar)*rhoL)
+delta_rho = lambda d_uvar, d_plvar, d_pgvar, uvar, plvar, pgvar : phi0*(d_pgvar-d_plvar)*dSl(pgvar-plvar)*rhoL
+
+# Momentum Balance
+LS = (rho(uk,plk,pgk)*inner(g,v)*dx
+        - inner(sigma(uk, plk,pgk) ,nabla_grad(v))*dx) +inner(T,v)*ds(2)
+
+aS = (inner(delta_sigma(delta_u,delta_pl,delta_pg,plk,pgk),nabla_grad(v))*dx        
+        - delta_rho(delta_u, delta_pl,delta_pg, uk, plk, pgk)*inner(g,v)*dx)
+
+# Liquid mass balance
+LL = ((phi0*Sl(pgk-plk) - phi0*Sl(pgt-plt))*ql*dx 
+        - h*kl(pgk-plk)/Etal*inner(Kil*(-nabla_grad(plk)),nabla_grad(ql))*dx
+        - h*kl(pgk-plk)/Etal*inner(Kil*(rhoL*g),nabla_grad(ql))*dx)
+
+aL = (  - (delta_pg-delta_pl)*phi0*dSl(pgk-plk)*ql*dx#       
+        + h*kl(pgk-plk)/Etal*inner(Kil*(-nabla_grad(delta_pl)),nabla_grad(ql))*dx 
+        + h*(delta_pg-delta_pl)*dSl(pgk-plk)*dkl(pgk-plk)/Etal*inner(Kil*(-nabla_grad(plk) + rhoL*g),nabla_grad(ql))*dx)
+
+# Gaz mass balance
+# PRENDRE NOTE DU MOINS EN DBT DE FORME
+LG = (-  (  H((pgk-plk)/p_width)*  (
+                           - h*pgk*(kg(pgk-plk)/Etag)*inner(Kig*(-nabla_grad(pgk)),nabla_grad(qg)))
+             - dH((pgk-plk)/p_width)*(inner(nabla_grad((pgk-plk)/p_width), h*pgk*(kg(pgk-plk)/Etag)*Kig*(-nabla_grad(pgk)))*qg)
+             + omega*H(-(pgk-plk)/p_width)*( pgk- (plk- p_sat )) *qg)*dx)
+
+aG = (   (  H((pgk-plk)/p_width)* (
+                           - h*pgk*(kg(pgk-plk)/Etag)*inner(Kig*(-nabla_grad(delta_pg)),nabla_grad(qg))
+                           - h*delta_pg*(kg(pgk-plk)/Etag)*inner(Kig*(-nabla_grad(pgk)),nabla_grad(qg))
+                           - h*pgk*(delta_pg-delta_pl)*(1/Etag)*dkg(pgk-plk)*dSl(pgk-plk)*inner(Kig*(-nabla_grad(pgk)),nabla_grad(qg))
+                          )
+             + omega*H(-(pgk-plk)/p_width)*(delta_pg-delta_pl)*qg 
+                          
+             - dH((pgk-plk)/p_width)*(  inner(nabla_grad((pgk-plk)/p_width),-h*delta_pg*(kg(pgk-plk)/Etag)*Kig*(-nabla_grad(pgk)))*qg
+                                      + inner(nabla_grad((pgk-plk)/p_width),-h*pgk*(kg(pgk-plk)/Etag)*Kig*(-nabla_grad(delta_pg)))*qg
+                                      + inner(nabla_grad((pgk-plk)/p_width),-h*pgk*((delta_pg-delta_pl)*dkg(pgk-plk)*dSl(pgk-plk)/Etag)*Kig*(-nabla_grad(pgk)))*qg)   
+             + dH((pgk-plk)/p_width)*((delta_pg-delta_pl)/p_width)*h*div(pgk*(kg(pgk-plk)/Etag)*Kig*(-nabla_grad(pgk)))*qg
+             + omega*dH(-(pgk-plk)/p_width)*((delta_pg-delta_pl)/p_width)*(pgk-(plk-p_sat))*qg
+             )*dx)
+
+
+# a and L definition
+a = aS + aL + aG
+L = LS + LL + LG 
